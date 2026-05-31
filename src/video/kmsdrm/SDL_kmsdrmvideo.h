@@ -92,6 +92,12 @@ typedef struct SDL_VideoData
        open 1 FD and create 1 gbm device. */
     SDL_bool gbm_init;
 
+    /* Panel orientation in degrees rotated, from DRM connector's
+       "panel orientation" property:
+         0 = normal, 90 = right side up, 180 = upside down, 270 = left side up.
+       0 = the rotation pipeline is bypassed entirely (single-surface path). */
+    int panel_rotation;
+
 } SDL_VideoData;
 
 typedef struct SDL_DisplayModeData

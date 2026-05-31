@@ -659,6 +659,51 @@ static SDL_bool KMSDRM_ConnectorCheckVrrCapable(uint32_t drm_fd,
     return SDL_FALSE;
 }
 
+/* Reads the connector's "panel orientation" enum property and returns
+   the rotation in degrees (0/90/180/270). Returns 0 on any failure
+   (property absent, getproperty errors, unknown enum value), which
+   keeps unrotated panels on the original single-surface code path.
+
+   Kernel mapping (see drivers/gpu/drm/drm_connector.c):
+     0=Normal  1=Upside Down  2=Left Side Up  3=Right Side Up */
+static int KMSDRM_GetPanelOrientation(uint32_t drm_fd, uint32_t connector_id)
+{
+    uint32_t i;
+    int rotation = 0;
+    SDL_bool found = SDL_FALSE;
+
+    drmModeObjectPropertiesPtr props = KMSDRM_drmModeObjectGetProperties(drm_fd,
+                                                                         connector_id,
+                                                                         DRM_MODE_OBJECT_CONNECTOR);
+
+    if (!props) {
+        return 0;
+    }
+
+    for (i = 0; !found && i < props->count_props; ++i) {
+        drmModePropertyPtr drm_prop = KMSDRM_drmModeGetProperty(drm_fd, props->props[i]);
+
+        if (!drm_prop) {
+            continue;
+        }
+
+        if (SDL_strcasecmp(drm_prop->name, "panel orientation") == 0) {
+            switch (props->prop_values[i]) {
+                case 1: rotation = 180; break;
+                case 2: rotation = 270; break;
+                case 3: rotation = 90;  break;
+                default: rotation = 0;  break;
+            }
+            found = SDL_TRUE;
+        }
+
+        KMSDRM_drmModeFreeProperty(drm_prop);
+    }
+
+    KMSDRM_drmModeFreeObjectProperties(props);
+    return rotation;
+}
+
 void KMSDRM_CrtcSetVrr(uint32_t drm_fd, uint32_t crtc_id, SDL_bool enabled)
 {
     uint32_t vrr_prop_id;
@@ -743,6 +788,19 @@ static void KMSDRM_AddDisplay(_THIS, drmModeConnector *connector, drmModeRes *re
        If we don't, new default cursors would stack up on mouse->cursors and SDL
        would have to hide and delete them at quit, not to mention the memory leak... */
     dispdata->default_cursor_init = SDL_FALSE;
+
+    /* Detect physical panel orientation from the connector property.
+       On these handhelds there is exactly one connected display, so storing
+       this on SDL_VideoData (driver-global) is fine. The rotation render
+       pipeline is gated on panel_rotation != 0; unrotated panels take the
+       original single-surface code path. */
+    viddata->panel_rotation = KMSDRM_GetPanelOrientation(viddata->drm_fd,
+                                                         connector->connector_id);
+    /* CRITICAL during bring-up so it shows up regardless of category
+       default priority (VIDEO defaults to CRITICAL). Demote to INFO
+       once we're past the rotation work. */
+    SDL_LogCritical(SDL_LOG_CATEGORY_VIDEO,
+                    "KMSDRM: detected panel rotation %d degrees", viddata->panel_rotation);
 
     /* Try to find the connector's current encoder */
     for (i = 0; i < resources->count_encoders; i++) {
