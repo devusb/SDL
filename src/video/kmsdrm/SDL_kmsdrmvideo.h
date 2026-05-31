@@ -32,6 +32,8 @@
 #include <xf86drmMode.h>
 #include <gbm.h>
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <GLES2/gl2.h>
 
 #ifndef DRM_FORMAT_MOD_INVALID
 #define DRM_FORMAT_MOD_INVALID 0x00ffffffffffffffULL
@@ -143,6 +145,19 @@ typedef struct SDL_WindowData
 
     EGLSurface egl_surface;
     SDL_bool egl_surface_dirty;
+
+    /* Panel-facing surface (used only when viddata->panel_rotation != 0).
+       The fields above hold the app-facing landscape surface; these hold
+       the panel-native portrait surface we actually page-flip to display. */
+    struct gbm_surface *gs_panel;
+    EGLSurface egl_surface_panel;
+    struct gbm_bo *bo_panel;
+    struct gbm_bo *next_bo_panel;
+    /* Rotation render-pass GL resources (created lazily on first rotated swap). */
+    GLuint rot_program;
+    GLuint rot_vbo;
+    GLuint rot_texture;
+    EGLImageKHR rot_egl_image;
 } SDL_WindowData;
 
 typedef struct KMSDRM_FBInfo

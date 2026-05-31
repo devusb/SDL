@@ -1196,6 +1196,11 @@ static void KMSDRM_DestroySurfaces(_THIS, SDL_Window *window)
         windata->egl_surface = EGL_NO_SURFACE;
     }
 
+    if (windata->egl_surface_panel != EGL_NO_SURFACE) {
+        SDL_EGL_DestroySurface(_this, windata->egl_surface_panel);
+        windata->egl_surface_panel = EGL_NO_SURFACE;
+    }
+
     /***************************/
     /* Destroy the GBM buffers */
     /***************************/
@@ -1210,6 +1215,16 @@ static void KMSDRM_DestroySurfaces(_THIS, SDL_Window *window)
         windata->next_bo = NULL;
     }
 
+    if (windata->bo_panel) {
+        KMSDRM_gbm_surface_release_buffer(windata->gs_panel, windata->bo_panel);
+        windata->bo_panel = NULL;
+    }
+
+    if (windata->next_bo_panel) {
+        KMSDRM_gbm_surface_release_buffer(windata->gs_panel, windata->next_bo_panel);
+        windata->next_bo_panel = NULL;
+    }
+
     /***************************/
     /* Destroy the GBM surface */
     /***************************/
@@ -1217,6 +1232,11 @@ static void KMSDRM_DestroySurfaces(_THIS, SDL_Window *window)
     if (windata->gs) {
         KMSDRM_gbm_surface_destroy(windata->gs);
         windata->gs = NULL;
+    }
+
+    if (windata->gs_panel) {
+        KMSDRM_gbm_surface_destroy(windata->gs_panel);
+        windata->gs_panel = NULL;
     }
 }
 
@@ -1299,12 +1319,38 @@ int KMSDRM_CreateSurfaces(_THIS, SDL_Window *window)
     display->current_mode.refresh_rate = dispdata->mode.vrefresh;
     display->current_mode.format = SDL_PIXELFORMAT_ARGB8888;
 
-    windata->gs = KMSDRM_gbm_surface_create(viddata->gbm_dev,
-                                            dispdata->mode.hdisplay, dispdata->mode.vdisplay,
-                                            surface_fmt, surface_flags);
-
-    if (!windata->gs) {
-        return SDL_SetError("Could not create GBM surface");
+    {
+        uint32_t panel_w = dispdata->mode.hdisplay;
+        uint32_t panel_h = dispdata->mode.vdisplay;
+        uint32_t app_w, app_h;
+        if (viddata->panel_rotation == 90 || viddata->panel_rotation == 270) {
+            app_w = panel_h;
+            app_h = panel_w;
+        } else {
+            app_w = panel_w;
+            app_h = panel_h;
+        }
+        windata->gs = KMSDRM_gbm_surface_create(viddata->gbm_dev,
+                                                app_w, app_h,
+                                                surface_fmt, surface_flags);
+        if (!windata->gs) {
+            return SDL_SetError("Could not create app GBM surface");
+        }
+        if (viddata->panel_rotation != 0) {
+            windata->gs_panel = KMSDRM_gbm_surface_create(viddata->gbm_dev,
+                                                          panel_w, panel_h,
+                                                          surface_fmt, surface_flags);
+            if (!windata->gs_panel) {
+                KMSDRM_gbm_surface_destroy(windata->gs);
+                windata->gs = NULL;
+                return SDL_SetError("Could not create panel GBM surface");
+            }
+            SDL_LogCritical(SDL_LOG_CATEGORY_VIDEO,
+                            "KMSDRM: allocated app surface %ux%u and panel surface %ux%u",
+                            app_w, app_h, panel_w, panel_h);
+        } else {
+            windata->gs_panel = NULL;
+        }
     }
 
     /* We can't get the EGL context yet because SDL_CreateRenderer has not been called,
@@ -1335,6 +1381,10 @@ cleanup:
         if (windata->gs) {
             KMSDRM_gbm_surface_destroy(windata->gs);
             windata->gs = NULL;
+        }
+        if (windata->gs_panel) {
+            KMSDRM_gbm_surface_destroy(windata->gs_panel);
+            windata->gs_panel = NULL;
         }
     }
 
