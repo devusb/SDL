@@ -956,12 +956,27 @@ static void KMSDRM_AddDisplay(_THIS, drmModeConnector *connector, drmModeRes *re
     modedata->mode_index = mode_index;
 
     display.driverdata = dispdata;
-    display.desktop_mode.w = dispdata->mode.hdisplay;
-    display.desktop_mode.h = dispdata->mode.vdisplay;
+    /* When the panel is mounted rotated 90/270, the DRM mode (hdisplay x
+       vdisplay) is the panel-native portrait, but SDL reports logical
+       landscape to apps so app-side framebuffer allocation matches what
+       the user sees. The DRM mode itself stays untouched — it's what
+       drmModeSetCrtc / drmModePageFlip use against the hardware. */
+    if (viddata->panel_rotation == 90 || viddata->panel_rotation == 270) {
+        display.desktop_mode.w = dispdata->mode.vdisplay;
+        display.desktop_mode.h = dispdata->mode.hdisplay;
+    } else {
+        display.desktop_mode.w = dispdata->mode.hdisplay;
+        display.desktop_mode.h = dispdata->mode.vdisplay;
+    }
     display.desktop_mode.refresh_rate = dispdata->mode.vrefresh;
     display.desktop_mode.format = SDL_PIXELFORMAT_ARGB8888;
     display.desktop_mode.driverdata = modedata;
     display.current_mode = display.desktop_mode;
+    SDL_LogCritical(SDL_LOG_CATEGORY_VIDEO,
+                    "KMSDRM: reporting %dx%d to apps (rotation %d, DRM mode %dx%d)",
+                    display.desktop_mode.w, display.desktop_mode.h,
+                    viddata->panel_rotation,
+                    dispdata->mode.hdisplay, dispdata->mode.vdisplay);
 
     /* Add the display to the list of SDL displays. */
     SDL_AddVideoDisplay(&display, SDL_FALSE);
@@ -1274,8 +1289,13 @@ int KMSDRM_CreateSurfaces(_THIS, SDL_Window *window)
        mode that's set in sync with what SDL_video.c thinks is set */
     KMSDRM_GetModeToSet(window, &dispdata->mode);
 
-    display->current_mode.w = dispdata->mode.hdisplay;
-    display->current_mode.h = dispdata->mode.vdisplay;
+    if (viddata->panel_rotation == 90 || viddata->panel_rotation == 270) {
+        display->current_mode.w = dispdata->mode.vdisplay;
+        display->current_mode.h = dispdata->mode.hdisplay;
+    } else {
+        display->current_mode.w = dispdata->mode.hdisplay;
+        display->current_mode.h = dispdata->mode.vdisplay;
+    }
     display->current_mode.refresh_rate = dispdata->mode.vrefresh;
     display->current_mode.format = SDL_PIXELFORMAT_ARGB8888;
 
@@ -1409,6 +1429,7 @@ void KMSDRM_VideoQuit(_THIS)
 /* Read modes from the connector modes, and store them in display->display_modes. */
 void KMSDRM_GetDisplayModes(_THIS, SDL_VideoDisplay *display)
 {
+    SDL_VideoData *viddata = ((SDL_VideoData *)_this->driverdata);
     SDL_DisplayData *dispdata = display->driverdata;
     drmModeConnector *conn = dispdata->connector;
     SDL_DisplayMode mode;
@@ -1421,8 +1442,13 @@ void KMSDRM_GetDisplayModes(_THIS, SDL_VideoDisplay *display)
             modedata->mode_index = i;
         }
 
-        mode.w = conn->modes[i].hdisplay;
-        mode.h = conn->modes[i].vdisplay;
+        if (viddata->panel_rotation == 90 || viddata->panel_rotation == 270) {
+            mode.w = conn->modes[i].vdisplay;
+            mode.h = conn->modes[i].hdisplay;
+        } else {
+            mode.w = conn->modes[i].hdisplay;
+            mode.h = conn->modes[i].vdisplay;
+        }
         mode.refresh_rate = conn->modes[i].vrefresh;
         mode.format = SDL_PIXELFORMAT_ARGB8888;
         mode.driverdata = modedata;
