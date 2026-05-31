@@ -1364,6 +1364,21 @@ int KMSDRM_CreateSurfaces(_THIS, SDL_Window *window)
         goto cleanup;
     }
 
+    if (windata->gs_panel) {
+        windata->egl_surface_panel =
+            SDL_EGL_CreateSurface(_this, (NativeWindowType)windata->gs_panel);
+        if (windata->egl_surface_panel == EGL_NO_SURFACE) {
+            SDL_LogError(SDL_LOG_CATEGORY_VIDEO,
+                         "KMSDRM: failed to create panel EGL surface");
+            /* Fall through — without panel surface, swap path will skip rotation. */
+        } else {
+            SDL_LogCritical(SDL_LOG_CATEGORY_VIDEO,
+                            "KMSDRM: created panel EGL surface");
+        }
+    } else {
+        windata->egl_surface_panel = EGL_NO_SURFACE;
+    }
+
     /* Current context passing to EGL is now done here. If something fails,
        go back to delayed SDL_EGL_MakeCurrent() call in SwapWindow. */
     egl_context = (EGLContext)SDL_GL_GetCurrentContext();
